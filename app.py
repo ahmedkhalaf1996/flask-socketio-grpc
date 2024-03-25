@@ -1,63 +1,19 @@
-from concurrent import futures
 from flask import Flask, request
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
-import grpc
-import sys 
-sys.path.append('protos')
-import Notification_pb2
-import Notification_pb2_grpc
 import threading
-from google.protobuf.empty_pb2 import Empty
-
+from grpc_se.grpc_server import run_grpc_server, set_user_connections, set_socketio
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'justasecretkeythatishouldputhere'
 
-socketio = SocketIO(app)
+socketio = SocketIO(app,  debug=False)
 CORS(app)
-user_connections = {}  # Store user connections
-
-# grpc start 
-class NotificationServicer(Notification_pb2_grpc.NotificationGrpcServiceServicer):
-    def SendGrpcNotification(self, request, context):
-        if request.mainuid not in user_connections:
-            print(f"User connection not found for mainuid: {request.mainuid}")
-            return Empty()
-
-
-        usersocketconnid = user_connections[request.mainuid]
-        print('grpc uconnid', usersocketconnid)
-        msg = {
-            "_id": request._id,
-            "createdAt":request.createdAt,
-            "deatils": request.deatils,
-            "isreded": request.isreded,
-            "mainuid": request.mainuid,
-            "targetid": request.targetid,
-            "user": {
-                "avatar": request.user.avatar,
-                "name": request.user.name
-            }
-        }
-        socketio.emit('notification', dict(data=str(msg)), room=usersocketconnid)
-        # You can add your logic here to send a notification over SocketIO
-        return Empty()
-
-def run_grpc_server():
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    Notification_pb2_grpc.add_NotificationGrpcServiceServicer_to_server(NotificationServicer(), server)
-    server.add_insecure_port('[::]:8090')
-    server.start()
-    print('gRPC server running...')
-    server.wait_for_termination()
-
-# grpc end 
+user_connections = {}  # Define user_connections dictionary
 
 @socketio.on('connect')
 def on_connect():
     print("user Connected")
-
 
 @socketio.on('setUserId')
 def handle_set_user_id(user_id):
@@ -65,7 +21,6 @@ def handle_set_user_id(user_id):
         try:
             user_connections[user_id] = request.sid
             print(f'User {user_id} connected with socket id {request.sid}')
-
             return 'User ID set successfully'
 
         except Exception as e:
@@ -83,9 +38,10 @@ def handle_disconnect():
     else:
         print('An unidentified user disconnected')
 
-
 if __name__ == '__main__':
+    set_user_connections(user_connections)  # Set the user_connections dictionary in the server module
+    set_socketio(socketio)  # Set the socketio object in the server module
     grpc_thread = threading.Thread(target=run_grpc_server)
     grpc_thread.start()
-    
-    socketio.run(app,  port=8088)
+
+    socketio.run(app, port=8088)
